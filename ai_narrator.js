@@ -157,7 +157,7 @@
     constructor() {
       super();
       this._shadow = this.attachShadow({ mode: "open" });
-      this._endpoint = "https://sac-ai-narrator.cfapps.us10.hana.ondemand.com";
+      this._endpoint = this.getAttribute("narratorEndpoint") || "https://sac-ai-narrator.cfapps.us10.hana.ondemand.com";
       this._chartTitle = "Ventas LATAM";
       this._chartData = null;
       this._showData = false;

@@ -10,7 +10,8 @@
 (function () {
   "use strict";
 
-  // ── Estilos del widget ────────────────────────────────────────────────────
+  const DEFAULT_ENDPOINT = "https://sac-ai-narrator.cfapps.us10.hana.ondemand.com";
+
   const STYLES = `
     :host {
       display: block;
@@ -36,9 +37,7 @@
       background: #0070f2;
       color: #fff;
     }
-    .narrator-header-icon {
-      font-size: 18px;
-    }
+    .narrator-header-icon { font-size: 18px; }
     .narrator-header-title {
       font-size: 13px;
       font-weight: 600;
@@ -65,9 +64,7 @@
       line-height: 1.7;
       display: none;
     }
-    .narrator-text.visible {
-      display: block;
-    }
+    .narrator-text.visible { display: block; }
     .narrator-loading {
       display: none;
       align-items: center;
@@ -76,9 +73,7 @@
       color: #0070f2;
       margin: auto;
     }
-    .narrator-loading.visible {
-      display: flex;
-    }
+    .narrator-loading.visible { display: flex; }
     .spinner {
       width: 16px;
       height: 16px;
@@ -113,15 +108,9 @@
       border: none;
       transition: background 0.15s;
     }
-    .btn-primary {
-      background: #0070f2;
-      color: #fff;
-    }
+    .btn-primary { background: #0070f2; color: #fff; }
     .btn-primary:hover { background: #0057c2; }
-    .btn-primary:disabled {
-      background: #c5d8f7;
-      cursor: not-allowed;
-    }
+    .btn-primary:disabled { background: #c5d8f7; cursor: not-allowed; }
     .btn-ghost {
       background: transparent;
       color: #0070f2;
@@ -151,39 +140,37 @@
     }
   `;
 
-  // ── Web Component ─────────────────────────────────────────────────────────
   class AINarrator extends HTMLElement {
 
     constructor() {
       super();
       this._shadow = this.attachShadow({ mode: "open" });
-      this._endpoint = this.getAttribute("narratorEndpoint") || "https://sac-ai-narrator.cfapps.us10.hana.ondemand.com";
+      this._narratorEndpoint = DEFAULT_ENDPOINT;
       this._chartTitle = "Ventas LATAM";
       this._chartData = null;
       this._showData = false;
       this._render();
     }
 
-    // ── SAC Widget API ──────────────────────────────────────────────────────
     connectedCallback() {
       this._render();
     }
 
-    // Propiedad: narratorEndpoint
-    get narratorEndpoint() { return this._endpoint; }
+    // ── Propiedades SAC ───────────────────────────────────────────────────
+    get narratorEndpoint() { return this._narratorEndpoint; }
     set narratorEndpoint(val) {
-      this._endpoint = val;
+      // SAC puede pasar undefined o vacío — siempre usar DEFAULT en ese caso
+      this._narratorEndpoint = (val && val.trim() !== "") ? val.trim() : DEFAULT_ENDPOINT;
     }
 
-    // Propiedad: chartTitle
     get chartTitle() { return this._chartTitle; }
     set chartTitle(val) {
-      this._chartTitle = val;
-      const titleEl = this._shadow.querySelector(".narrator-header-title");
-      if (titleEl) titleEl.textContent = `✨ AI Narrator — ${val}`;
+      this._chartTitle = val || "Ventas LATAM";
+      const el = this._shadow.querySelector(".narrator-header-title");
+      if (el) el.textContent = `✨ AI Narrator — ${this._chartTitle}`;
     }
 
-    // Método público: analyze() — llamado desde Script del Story
+    // ── Método público llamable desde Script SAC ──────────────────────────
     analyze(dataBinding) {
       if (dataBinding) {
         this._chartData = this._parseDataBinding(dataBinding);
@@ -191,7 +178,7 @@
       this._runAnalysis();
     }
 
-    // ── Render ──────────────────────────────────────────────────────────────
+    // ── Render ────────────────────────────────────────────────────────────
     _render() {
       this._shadow.innerHTML = `
         <style>${STYLES}</style>
@@ -220,24 +207,26 @@
           </div>
         </div>
       `;
-
       this._shadow.getElementById("btn-analyze").addEventListener("click", () => this._runAnalysis());
       this._shadow.getElementById("btn-clear").addEventListener("click", () => this._clear());
       this._shadow.querySelector(".toggle-data").addEventListener("click", () => this._toggleData());
     }
 
-    // ── Análisis principal ──────────────────────────────────────────────────
+    // ── Análisis principal ────────────────────────────────────────────────
     async _runAnalysis() {
       const btn = this._shadow.getElementById("btn-analyze");
       btn.disabled = true;
-
       this._showState("loading");
 
-      // Si no hay datos vinculados, usa datos demo de ventas LATAM
+      // Siempre usar DEFAULT si el endpoint está vacío
+      const endpoint = (this._narratorEndpoint && this._narratorEndpoint.trim() !== "")
+        ? this._narratorEndpoint
+        : DEFAULT_ENDPOINT;
+
       const chartData = this._chartData || this._getDemoData();
 
       try {
-        const response = await fetch(`${this._endpoint}/analyze`, {
+        const response = await fetch(`${endpoint}/analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chart_data: chartData })
@@ -251,71 +240,52 @@
         const result = await response.json();
         this._showNarration(result.narration, chartData);
 
-        // Disparar evento SAC
         this.dispatchEvent(new CustomEvent("onNarrationReady", {
           detail: { narration: result.narration },
           bubbles: true
         }));
 
       } catch (err) {
-        this._showError(`Error al conectar con AI Core: ${err.message}`);
+        this._showError(`Error: ${err.message}`);
       } finally {
         btn.disabled = false;
       }
     }
 
-    // ── Parsear DataBinding de SAC ──────────────────────────────────────────
     _parseDataBinding(dataBinding) {
-      // dataBinding viene del Widget API de SAC — adaptamos al formato del backend
       try {
         const data = dataBinding.data || [];
         const dimensions = dataBinding.dimensions || [];
         const measures = dataBinding.measures || [];
-
         const labels = data.map(row => row[dimensions[0]?.id] || "N/A");
         const series = measures.map(m => ({
           name: m.label || m.id,
           values: data.map(row => parseFloat(row[m.id]) || 0)
         }));
-
-        return {
-          title: this._chartTitle,
-          labels,
-          series,
-          filters: dataBinding.filters || {}
-        };
+        return { title: this._chartTitle, labels, series, filters: dataBinding.filters || {} };
       } catch (e) {
         return this._getDemoData();
       }
     }
 
-    // ── Datos demo ──────────────────────────────────────────────────────────
     _getDemoData() {
       return {
-        title: "Ventas por País LATAM — Q1 2026",
-        labels: ["Chile", "Argentina", "Perú", "Colombia", "México"],
+        title: "Ventas por Pais LATAM - Q1 2026",
+        labels: ["Chile", "Argentina", "Peru", "Colombia", "Mexico"],
         series: [
-          {
-            name: "Revenue (USD)",
-            values: [1250000, 980000, 620000, 840000, 1750000]
-          },
-          {
-            name: "Target (USD)",
-            values: [1100000, 1050000, 700000, 800000, 1600000]
-          }
+          { name: "Revenue (USD)", values: [1250000, 980000, 620000, 840000, 1750000] },
+          { name: "Target (USD)",  values: [1100000, 1050000, 700000, 800000, 1600000] }
         ],
         filters: { Period: "Q1 2026", Segment: "Corporate" }
       };
     }
 
-    // ── Estados UI ───────────────────────────────────────────────────────────
     _showState(state) {
       const placeholder = this._shadow.querySelector(".narrator-placeholder");
       const loading     = this._shadow.querySelector(".narrator-loading");
       const text        = this._shadow.querySelector(".narrator-text");
       const error       = this._shadow.querySelector(".narrator-error");
-
-      placeholder.style.display = state === "idle"     ? "block" : "none";
+      placeholder.style.display = state === "idle" ? "block" : "none";
       loading.classList.toggle("visible", state === "loading");
       text.classList.toggle("visible",    state === "result");
       error.classList.toggle("visible",   state === "error");
@@ -324,15 +294,10 @@
     _showNarration(narration, chartData) {
       this._showState("result");
       this._shadow.querySelector(".narrator-text").textContent = narration;
-
-      // Mostrar botón limpiar y toggle de datos
       this._shadow.getElementById("btn-clear").style.display = "inline-block";
       const toggleBtn = this._shadow.querySelector(".toggle-data");
       toggleBtn.style.display = "inline-block";
-
-      // Guardar datos para preview
-      this._shadow.querySelector(".data-preview").textContent =
-        JSON.stringify(chartData, null, 2);
+      this._shadow.querySelector(".data-preview").textContent = JSON.stringify(chartData, null, 2);
     }
 
     _showError(msg) {
@@ -359,7 +324,6 @@
     }
   }
 
-  // Registrar el Web Component
   customElements.define("com-sap-presales-ai-narrator", AINarrator);
 
 })();

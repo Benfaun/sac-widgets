@@ -1,0 +1,41 @@
+{
+  "id": "com.sap.presales.ai_narrator",
+  "version": "1.0.0",
+  "name": "AI Narrator",
+  "newInstancePrefix": "AINarrator",
+  "description": "Genera narrativas ejecutivas en lenguaje natural usando SAP AI Core (GPT-4o)",
+  "vendor": "SAP Presales LATAM",
+  "eula": "",
+  "license": "",
+  "webcomponents": [
+    {
+      "kind": "main",
+      "tag": "com-sap-presales-ai-narrator",
+      "url": "https://benfaun.github.io/sac-widgets/ai_narrator.js",
+      "integrity": "",
+      "ignoreIntegrity": true
+    }
+  ],
+  "properties": {
+    "narratorEndpoint": {
+      "type": "string",
+      "description": "URL del backend CF",
+      "default": "https://sac-ai-narrator.cfapps.us10.hana.ondemand.com"
+    },
+    "chartTitle": {
+      "type": "string",
+      "description": "Titulo del grafico",
+      "default": "Ventas LATAM"
+    }
+  },
+  "methods": {
+    "analyze": {
+      "description": "Analiza el grafico y genera narracion"
+    }
+  },
+  "events": {
+    "onNarrationReady": {
+      "description": "Se dispara cuando la narracion esta lista"
+    }
+  }
+}

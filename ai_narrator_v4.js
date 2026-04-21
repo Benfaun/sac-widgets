@@ -160,7 +160,7 @@
           const dim0 = row.dimensions_0;
           if (!dim0) return;
           const key = dim0.label || dim0.id || "N/A";
-          const val = parseFloat(dim0.measures_0?.raw) || 0;
+          const val = parseFloat(row.measures_0?.raw) || 0;
           groups[key] = (groups[key] || 0) + val;
         });
 

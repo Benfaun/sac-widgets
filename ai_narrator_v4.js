@@ -62,13 +62,13 @@
     onCustomWidgetAfterUpdate(changedProperties) {
       if ("dataBinding" in changedProperties) {
         const binding = changedProperties["dataBinding"];
-        console.log("AI Narrator afterUpdate binding keys:", binding ? Object.keys(binding) : null);
+        console.log("AI Narrator afterUpdate state:", binding?.state);
         if (binding) {
           const parsed = this._parseBinding(binding);
-          console.log("AI Narrator parsed:", parsed ? `OK - ${parsed.labels.length} labels` : "NULL");
           if (parsed) {
             this._boundData = parsed;
             this._updateDataSummary();
+            if (!this._loading) this._sendMessage(null, "auto");
           }
         }
       }

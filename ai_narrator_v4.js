@@ -136,6 +136,7 @@
     // ── Parsear DataBinding de SAC ────────────────────────────────────────────
     _parseBinding(db) {
       try {
+        console.log("AI Narrator binding:", JSON.stringify(db).slice(0, 500));
         const data       = db.data || [];
         const dimensions = db.dimensions || [];
         const measures   = db.measures || [];

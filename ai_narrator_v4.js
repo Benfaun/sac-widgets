@@ -140,21 +140,19 @@
       try {
         console.log("AI Narrator binding:", JSON.stringify(db).slice(0, 800));
 
-        if (db.state && db.state !== "ok") return null;
+        if (db.state && db.state !== "ok" && db.state !== "success") return null;
 
         const data = db.data || [];
         const rows = data.filter(r => !r.metadata);
         if (rows.length === 0) return null;
 
-        // Metadata puede estar en db.metadata o en la ultima fila
-        const meta  = db.metadata || data.find(r => r.metadata)?.metadata || {};
-        const feeds = meta.feeds || {};
+        // Metadata real de SAC: metadata.dimensions y metadata.mainStructureMembers
+        const dimMeta  = db.metadata?.dimensions           || {};
+        const measMeta = db.metadata?.mainStructureMembers || {};
 
-        const dimMeta  = feeds.dimensions?.values  || [];
-        const measMeta = (feeds.measures?.values || feeds.mainStructureMembers || []);
-
-        const dimLabel  = dimMeta[0]?.description  || dimMeta[0]?.label  || "Dimension";
-        const measLabel = measMeta[0]?.label || measMeta[0]?.description || "Measure";
+        const allDims   = Object.values(dimMeta).map(d => d.description || d.id).join(", ") || "Dimension";
+        const allMeas   = Object.values(measMeta).map(m => m.label || m.id).join(", ")      || "Measure";
+        const measLabel = Object.values(measMeta)[0]?.label || "Measure";
 
         // Cada fila: dimensions_0.label = valor dim, dimensions_0.measures_0.raw = valor medida
         const groups = {};
@@ -175,8 +173,8 @@
           series: [{ name: measLabel, values }],
           filters: db.filters || {},
           metadata: {
-            dimensions: dimMeta.map(d => d.description || d.label || d.id).join(", ") || dimLabel,
-            measures:   measMeta.map(m => m.label || m.id).join(", ") || measLabel,
+            dimensions: allDims,
+            measures:   allMeas,
             totalRows:  rows.length,
             rawData:    rows.slice(0, 50)
           }

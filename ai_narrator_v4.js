@@ -43,7 +43,8 @@
     .btn-suggest:hover { background: #531fa3; }
     .btn-suggest:disabled { background: #c9b8e8; cursor: not-allowed; }
     .msg-suggestion { background: #f5f0ff; border: 1px solid #d3b8f5; color: #1a1a1a; align-self: flex-start; max-width: 95%; }
-    .suggestion-title { font-weight: 700; color: #6b2fcc; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .msg-divider { text-align: center; color: #aaa; font-size: 10px; margin: 4px 0; display: flex; align-items: center; gap: 6px; }
+    .msg-divider::before, .msg-divider::after { content: ""; flex: 1; border-top: 1px solid #e5e5e5; }
   `;
 
   class AINarrator extends HTMLElement {
@@ -53,6 +54,8 @@
       this._boundData = null;
       this._history = [];
       this._loading = false;
+      this._autoAnalyzeTimer = null;
+      this._isFirstLoad = true;
     }
 
     connectedCallback() {
@@ -69,9 +72,19 @@
         if (binding) {
           const parsed = this._parseBinding(binding);
           if (parsed) {
+            const isUpdate = !!this._boundData;
             this._boundData = parsed;
             this._updateDataSummary();
-            if (!this._loading) this._sendMessage(null, "auto");
+            clearTimeout(this._autoAnalyzeTimer);
+            this._autoAnalyzeTimer = setTimeout(() => {
+              if (!this._loading) {
+                if (isUpdate && !this._isFirstLoad) {
+                  this._addDivider("Filtros actualizados \u2014 re-analizando");
+                }
+                this._isFirstLoad = false;
+                this._sendMessage(null, "auto");
+              }
+            }, 600);
           }
         }
       }
@@ -390,6 +403,15 @@ Responde siempre en espanol, en tono ejecutivo y conciso.${usingDemo ? " AVISO: 
       chatArea.appendChild(div);
       chatArea.scrollTop = chatArea.scrollHeight;
       return id;
+    }
+
+    _addDivider(text) {
+      const chatArea = this._shadow.getElementById("chat-area");
+      const div = document.createElement("div");
+      div.className = "msg-divider";
+      div.textContent = text;
+      chatArea.appendChild(div);
+      chatArea.scrollTop = chatArea.scrollHeight;
     }
 
     _removeMessage(id) {

@@ -136,41 +136,47 @@
     // ── Parsear DataBinding de SAC ────────────────────────────────────────────
     _parseBinding(db) {
       try {
-        console.log("AI Narrator binding:", JSON.stringify(db).slice(0, 500));
-        const data       = db.data || [];
-        const dimensions = db.dimensions || [];
-        const measures   = db.measures || [];
+        console.log("AI Narrator binding:", JSON.stringify(db).slice(0, 800));
 
-        if (data.length === 0) return null;
+        if (db.state && db.state !== "ok") return null;
 
-        const dimId     = dimensions[0]?.id;
-        const dimLabel  = dimensions[0]?.description || dimensions[0]?.label || dimId;
-        const measId    = measures[0]?.id;
-        const measLabel = measures[0]?.description || measures[0]?.label || measId;
+        const data = db.data || [];
+        const rows = data.filter(r => !r.metadata);
+        if (rows.length === 0) return null;
 
-        // Agrupar valores por primera dimension
+        // Metadata puede estar en db.metadata o en la ultima fila
+        const meta  = db.metadata || data.find(r => r.metadata)?.metadata || {};
+        const feeds = meta.feeds || {};
+
+        const dimMeta  = feeds.dimensions?.values  || [];
+        const measMeta = (feeds.measures?.values || feeds.mainStructureMembers || []);
+
+        const dimLabel  = dimMeta[0]?.description  || dimMeta[0]?.label  || "Dimension";
+        const measLabel = measMeta[0]?.label || measMeta[0]?.description || "Measure";
+
+        // Cada fila: dimensions_0.label = valor dim, dimensions_0.measures_0.raw = valor medida
         const groups = {};
-        data.forEach(row => {
-          const key = row[dimId] || "N/A";
-          const val = parseFloat(row[measId]) || 0;
+        rows.forEach(row => {
+          const dim0 = row.dimensions_0;
+          if (!dim0) return;
+          const key = dim0.label || dim0.id || "N/A";
+          const val = parseFloat(dim0.measures_0?.raw) || 0;
           groups[key] = (groups[key] || 0) + val;
         });
 
         const labels = Object.keys(groups);
         const values = Object.values(groups);
-        const allDims = dimensions.map(d => d.description || d.label || d.id).join(", ");
-        const allMeas = measures.map(m => m.description || m.label || m.id).join(", ");
 
         return {
-          title: "Analisis del modelo Test_SAC_Assistant",
+          title: "Analisis del modelo",
           labels,
           series: [{ name: measLabel, values }],
           filters: db.filters || {},
           metadata: {
-            dimensions: allDims,
-            measures: allMeas,
-            totalRows: data.length,
-            rawData: data.slice(0, 50)
+            dimensions: dimMeta.map(d => d.description || d.label || d.id).join(", ") || dimLabel,
+            measures:   measMeta.map(m => m.label || m.id).join(", ") || measLabel,
+            totalRows:  rows.length,
+            rawData:    rows.slice(0, 50)
           }
         };
       } catch(e) {

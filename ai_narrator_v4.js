@@ -1,7 +1,6 @@
 /**
  * SAC Custom Widget — AI Narrator v4
- * Data binding directo + Chat interface
- * Modelo: Test_SAC_Assistant (Cuentas, Date, Productos, Organizacion, Version / Measure)
+ * Data binding directo + Chat interface con multi-medida y multi-moneda
  */
 
 (function () {
@@ -40,6 +39,11 @@
     .btn-send { background: #0070f2; color: #fff; padding: 5px 10px; }
     .btn-send:hover { background: #0057c2; }
     .btn-send:disabled { background: #c5d8f7; cursor: not-allowed; }
+    .btn-suggest { background: #6b2fcc; color: #fff; }
+    .btn-suggest:hover { background: #531fa3; }
+    .btn-suggest:disabled { background: #c9b8e8; cursor: not-allowed; }
+    .msg-suggestion { background: #f5f0ff; border: 1px solid #d3b8f5; color: #1a1a1a; align-self: flex-start; max-width: 95%; }
+    .suggestion-title { font-weight: 700; color: #6b2fcc; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
   `;
 
   class AINarrator extends HTMLElement {
@@ -58,11 +62,10 @@
     get narratorEndpoint() { return ENDPOINT; }
     set narratorEndpoint(val) {}
 
-    // ── SAC Data Binding — se llama automaticamente cuando los datos cambian ──
+    // ── SAC Data Binding ──────────────────────────────────────────────────────
     onCustomWidgetAfterUpdate(changedProperties) {
       if ("dataBinding" in changedProperties) {
         const binding = changedProperties["dataBinding"];
-        console.log("AI Narrator afterUpdate state:", binding?.state);
         if (binding) {
           const parsed = this._parseBinding(binding);
           if (parsed) {
@@ -74,14 +77,10 @@
       }
     }
 
-    // Metodo publico para trigger desde Script SAC
     setData(dataBinding) {
       if (!dataBinding) return;
       const parsed = this._parseBinding(dataBinding);
-      if (parsed) {
-        this._boundData = parsed;
-        this._updateDataSummary();
-      }
+      if (parsed) { this._boundData = parsed; this._updateDataSummary(); }
     }
 
     analyze(dataBinding) {
@@ -120,6 +119,7 @@
             </div>
             <div class="btn-row">
               <button class="btn btn-ghost" id="btn-clear">Limpiar</button>
+              <button class="btn btn-suggest" id="btn-suggest">&#x1F4A1; Sugerir</button>
               <button class="btn btn-primary" id="btn-analyze">&#x2728; Analizar</button>
             </div>
           </div>
@@ -129,53 +129,75 @@
       const input = this._shadow.getElementById("chat-input");
       this._shadow.getElementById("btn-send").addEventListener("click", () => this._sendFromInput());
       this._shadow.getElementById("btn-analyze").addEventListener("click", () => this._sendMessage(null, "auto"));
+      this._shadow.getElementById("btn-suggest").addEventListener("click", () => this._sendMessage(null, "suggest"));
       this._shadow.getElementById("btn-clear").addEventListener("click", () => this._clearChat());
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this._sendFromInput(); }
       });
     }
 
-    // ── Parsear DataBinding de SAC ────────────────────────────────────────────
+    // ── Parsear DataBinding — detecta todas las medidas y dimensiones ─────────
     _parseBinding(db) {
       try {
-        console.log("AI Narrator binding:", JSON.stringify(db).slice(0, 800));
-
         if (db.state && db.state !== "ok" && db.state !== "success") return null;
 
         const data = db.data || [];
         const rows = data.filter(r => !r.metadata);
         if (rows.length === 0) return null;
 
-        // Metadata real de SAC: metadata.dimensions y metadata.mainStructureMembers
-        const dimMeta  = db.metadata?.dimensions           || {};
-        const measMeta = db.metadata?.mainStructureMembers || {};
+        const firstRow = rows[0];
+        const dimKeys  = Object.keys(firstRow).filter(k => k.startsWith("dimensions_")).sort();
+        const measKeys = Object.keys(firstRow).filter(k => k.startsWith("measures_")).sort();
 
-        const allDims   = Object.values(dimMeta).map(d => d.description || d.id).join(", ") || "Dimension";
-        const allMeas   = Object.values(measMeta).map(m => m.label || m.id).join(", ")      || "Measure";
-        const measLabel = Object.values(measMeta)[0]?.label || "Measure";
+        // Labels desde metadata de SAC
+        const dimMeta  = db.metadata?.dimensions            || {};
+        const measMeta = db.metadata?.mainStructureMembers  || {};
 
-        // Cada fila: dimensions_0.label = valor dim, dimensions_0.measures_0.raw = valor medida
+        const dimLabels  = dimKeys.map(k  => dimMeta[k]?.description  || dimMeta[k]?.id  || k);
+        const measLabels = measKeys.map(k => measMeta[k]?.label       || measMeta[k]?.id || k);
+
+        // Filas ricas: todas las dimensiones + todas las medidas con moneda
+        const richRows = rows.map(row => {
+          const dims = dimKeys.map((k, i) => ({
+            label: dimLabels[i],
+            value: row[k]?.label || row[k]?.id || "N/A"
+          }));
+          const measures = measKeys.map((k, i) => ({
+            label:     measLabels[i],
+            raw:       row[k]?.raw,
+            formatted: row[k]?.formatted,
+            unit:      (row[k]?.unit && row[k]?.unit !== "*") ? row[k]?.unit : null
+          })).filter(m => m.raw !== undefined && m.raw !== null);
+          return { dims, measures };
+        });
+
+        // Monedas presentes (para contexto del AI)
+        const currencies = [...new Set(
+          richRows.flatMap(r => r.measures.map(m => m.unit).filter(Boolean))
+        )];
+
+        const allDims = dimLabels.join(", ")  || "Dimension";
+        const allMeas = measLabels.join(", ") || "Measure";
+
+        // Serie principal (primera medida) para compatibilidad
         const groups = {};
-        rows.forEach(row => {
-          const dim0 = row.dimensions_0;
-          if (!dim0) return;
-          const key = dim0.label || dim0.id || "N/A";
-          const val = parseFloat(row.measures_0?.raw) || 0;
+        richRows.forEach(r => {
+          const key = r.dims[0]?.value || "N/A";
+          const val = r.measures[0]?.raw || 0;
           groups[key] = (groups[key] || 0) + val;
         });
 
-        const labels = Object.keys(groups);
-        const values = Object.values(groups);
-
         return {
           title: "Analisis del modelo",
-          labels,
-          series: [{ name: measLabel, values }],
+          labels: Object.keys(groups),
+          series: [{ name: measLabels[0] || "Measure", values: Object.values(groups) }],
           filters: db.filters || {},
           metadata: {
             dimensions: allDims,
             measures:   allMeas,
-            totalRows:  rows.length,
+            currencies: currencies.length > 0 ? currencies.join(", ") : null,
+            totalRows:  richRows.length,
+            richRows,
             rawData:    rows.slice(0, 50)
           }
         };
@@ -185,16 +207,58 @@
       }
     }
 
+    // ── Construir contexto de datos completo para el prompt ───────────────────
+    _buildDataContext(chartData) {
+      const m = chartData.metadata;
+      const lines = [
+        `Dimensiones: ${m.dimensions}`,
+        `Medidas: ${m.measures}`
+      ];
+
+      if (m.currencies) {
+        lines.push(`Monedas presentes: ${m.currencies} (considerar al comparar valores entre filas)`);
+      }
+
+      lines.push(`\nDatos detallados (${m.totalRows} filas):`);
+
+      if (m.richRows && m.richRows.length > 0) {
+        m.richRows.slice(0, 40).forEach(row => {
+          const dimStr  = row.dims.map(d => `${d.label}=${d.value}`).join(" | ");
+          const measStr = row.measures
+            .map(me => `${me.label}: ${me.formatted || me.raw}${me.unit ? " " + me.unit : ""}`)
+            .join(", ");
+          lines.push(`  [${dimStr}] ${measStr}`);
+        });
+      } else {
+        // Fallback al resumen simple
+        chartData.labels.forEach((l, i) => {
+          lines.push(`  ${l}: ${chartData.series[0]?.values[i]}`);
+        });
+      }
+
+      if (chartData.filters && Object.keys(chartData.filters).length > 0) {
+        lines.push(`\nFiltros activos: ${JSON.stringify(chartData.filters)}`);
+      }
+
+      return lines.join("\n");
+    }
+
     _getDemoData() {
       return {
-        title: "Demo — Test_SAC_Assistant",
-        labels: ["Cuenta A", "Cuenta B", "Cuenta C", "Cuenta D"],
-        series: [{ name: "Measure", values: [120000, 95000, 43000, 78000] }],
-        filters: { Version: "Actual", Date: "2024" },
+        title: "Demo",
+        labels: ["Region A", "Region B", "Region C"],
+        series: [{ name: "Revenue", values: [120000, 95000, 43000] }],
+        filters: {},
         metadata: {
-          dimensions: "Cuentas, Organizacion, Productos, Date",
-          measures: "Measure",
-          totalRows: 4
+          dimensions: "Organization",
+          measures: "Revenue",
+          currencies: "USD",
+          totalRows: 3,
+          richRows: [
+            { dims: [{label:"Organization", value:"Region A"}], measures: [{label:"Revenue", raw:120000, formatted:"120,000", unit:"USD"}] },
+            { dims: [{label:"Organization", value:"Region B"}], measures: [{label:"Revenue", raw:95000,  formatted:"95,000",  unit:"USD"}] },
+            { dims: [{label:"Organization", value:"Region C"}], measures: [{label:"Revenue", raw:43000,  formatted:"43,000",  unit:"USD"}] }
+          ]
         }
       };
     }
@@ -206,7 +270,9 @@
       if (!summary || !text) return;
       summary.style.display = "block";
       const m = this._boundData.metadata;
-      text.textContent = `${m.totalRows} filas \u2022 Dims: ${m.dimensions} \u2022 Medidas: ${m.measures}`;
+      let txt = `${m.totalRows} filas \u2022 Dims: ${m.dimensions} \u2022 Medidas: ${m.measures}`;
+      if (m.currencies) txt += ` \u2022 Monedas: ${m.currencies}`;
+      text.textContent = txt;
     }
 
     // ── Chat ──────────────────────────────────────────────────────────────────
@@ -232,19 +298,27 @@
 
       const loadingId = this._addMessage("loading", "Consultando SAP AI Core...");
 
-      const systemPrompt = `Eres un analista de negocio experto en SAP Analytics Cloud.
-Tienes acceso a datos del modelo Test_SAC_Assistant con dimensiones: ${chartData.metadata?.dimensions || "no especificadas"}.
-Responde siempre en espanol, en tono ejecutivo y conciso.${usingDemo ? " (Nota: usando datos demo)" : ""}`;
+      const dataContext = this._buildDataContext(chartData);
 
-      const dataContext = `Datos disponibles:
-Titulo: ${chartData.title}
-Filtros: ${JSON.stringify(chartData.filters)}
-Resumen por dimension (${chartData.labels.length} valores):
-${chartData.labels.map((l, i) => `  ${l}: ${chartData.series[0]?.values[i]}`).join("\n")}`;
+      const currencyNote = chartData.metadata?.currencies
+        ? `Los datos pueden estar en distintas monedas (${chartData.metadata.currencies}). No compares valores de monedas diferentes sin aclararlo.`
+        : "";
+
+      const systemPrompt = `Eres un analista de negocio experto en SAP Analytics Cloud.
+Tienes acceso a datos reales del modelo con dimensiones: ${chartData.metadata?.dimensions || "no especificadas"} y medidas: ${chartData.metadata?.measures || "no especificadas"}.
+${currencyNote}
+Responde siempre en espanol, en tono ejecutivo y conciso.${usingDemo ? " AVISO: usando datos demo." : ""}`;
+
+      // En modo chat incluir historial reciente para contexto
+      const historyContext = mode === "chat" && this._history.length > 0
+        ? `\nHistorial reciente:\n${this._history.slice(-4).map(h => `${h.role === "user" ? "Usuario" : "Asistente"}: ${h.content}`).join("\n")}\n`
+        : "";
 
       const userPrompt = mode === "auto"
-        ? `${dataContext}\n\nGenera una narrativa ejecutiva en 3-4 oraciones. Incluye: tendencia principal, valores destacados y una recomendacion accionable.`
-        : `${dataContext}\n\nPregunta: ${question}\n\nResponde de forma concisa basandote en los datos.`;
+        ? `${dataContext}\n\nGenera una narrativa ejecutiva en 4-5 oraciones. Incluye: tendencias principales, valores destacados por dimension, comparacion entre medidas clave, y una recomendacion accionable. Si hay multiples monedas, mencionalo.`
+        : mode === "suggest"
+        ? `${dataContext}\n\nEres un consultor de SAP Analytics Cloud. Basandote en los datos disponibles (dimensiones: ${chartData.metadata?.dimensions}, medidas: ${chartData.metadata?.measures}), sugiere 3 visualizaciones especificas para este modelo.\n\nPara cada visualizacion indica:\n- Tipo de grafico SAC (Bar Chart, Line Chart, Waterfall, Pie/Donut, Bullet, Heat Map, etc.)\n- Titulo sugerido\n- Eje/Dimension: que dimension usar\n- Medida(s): que medidas mostrar\n- Filtros recomendados si aplica\n- Por que es util para el negocio\n\nFormato: lista numerada, concisa y especifica con los nombres exactos de dimensiones y medidas del modelo.`
+        : `${dataContext}${historyContext}\n\nPregunta: ${question}\n\nResponde de forma concisa y precisa basandote en los datos. Incluye valores especificos cuando sea relevante.`;
 
       try {
         const resp = await fetch(`${ENDPOINT}/analyze`, {
@@ -261,9 +335,11 @@ ${chartData.labels.map((l, i) => `  ${l}: ${chartData.series[0]?.values[i]}`).jo
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const result = await resp.json();
 
-        this._addMessage("assistant", result.narration);
-        this._history.push({ role: "user", content: userPrompt });
+        this._addMessage("assistant", result.narration, mode === "suggest");
+        this._history.push({ role: "user",      content: mode === "auto" ? "[analisis automatico]" : question });
         this._history.push({ role: "assistant", content: result.narration });
+        // Limitar historial a ultimas 10 interacciones
+        if (this._history.length > 20) this._history = this._history.slice(-20);
 
         this.dispatchEvent(new CustomEvent("onNarrationReady", {
           detail: { narration: result.narration },
@@ -280,7 +356,7 @@ ${chartData.labels.map((l, i) => `  ${l}: ${chartData.series[0]?.values[i]}`).jo
     }
 
     // ── UI helpers ────────────────────────────────────────────────────────────
-    _addMessage(type, text) {
+    _addMessage(type, text, isSuggestion = false) {
       const placeholder = this._shadow.getElementById("placeholder");
       if (placeholder) placeholder.style.display = "none";
 
@@ -288,13 +364,26 @@ ${chartData.labels.map((l, i) => `  ${l}: ${chartData.series[0]?.values[i]}`).jo
       const id = "msg-" + Date.now() + Math.random();
       const div = document.createElement("div");
       div.id = id;
-      div.className = type === "loading" ? "msg msg-loading"
-                    : type === "user"    ? "msg msg-user"
-                    : "msg msg-assistant";
 
       if (type === "loading") {
+        div.className = "msg msg-loading";
         div.innerHTML = `<div class="spinner"></div><span>${text}</span>`;
+      } else if (type === "user") {
+        div.className = "msg msg-user";
+        div.textContent = text;
+      } else if (isSuggestion) {
+        div.className = "msg msg-suggestion";
+        const title = document.createElement("div");
+        title.className = "suggestion-title";
+        title.textContent = "&#x1F4A1; Sugerencias de visualizacion";
+        title.innerHTML = "&#x1F4A1; Sugerencias de visualizaci\u00f3n";
+        div.appendChild(title);
+        const body = document.createElement("div");
+        body.style.whiteSpace = "pre-wrap";
+        body.textContent = text;
+        div.appendChild(body);
       } else {
+        div.className = "msg msg-assistant";
         div.textContent = text;
       }
 
@@ -317,10 +406,12 @@ ${chartData.labels.map((l, i) => `  ${l}: ${chartData.series[0]?.values[i]}`).jo
     }
 
     _setButtons(disabled) {
-      const btn  = this._shadow.getElementById("btn-analyze");
-      const send = this._shadow.getElementById("btn-send");
-      if (btn)  btn.disabled  = disabled;
-      if (send) send.disabled = disabled;
+      const btn     = this._shadow.getElementById("btn-analyze");
+      const suggest = this._shadow.getElementById("btn-suggest");
+      const send    = this._shadow.getElementById("btn-send");
+      if (btn)     btn.disabled     = disabled;
+      if (suggest) suggest.disabled = disabled;
+      if (send)    send.disabled    = disabled;
     }
   }
 
